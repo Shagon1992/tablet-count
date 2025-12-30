@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tablet Counter</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f766e">
+
+<style>
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f0fdfa;
+  color: #042f2e;
+  text-align: center;
+}
+header {
+  padding: 20px;
+}
+button {
+  padding: 14px 20px;
+  font-size: 16px;
+  border-radius: 12px;
+  border: none;
+  background: #0f766e;
+  color: white;
+}
+button.secondary {
+  background: #134e4a;
+}
+.hidden { display: none; }
+
+video, canvas {
+  width: 100%;
+  max-width: 420px;
+  border-radius: 16px;
+  margin-top: 10px;
+}
+
+#count {
+  font-size: 48px;
+  font-weight: bold;
+  margin: 10px 0;
+}
+</style>
+</head>
+
+<body>
+
+<header id="landing">
+  <h2>Tablet Counter</h2>
+  <p>Hitung tablet dengan kamera HP</p>
+  <button onclick="openApp()">Buka Aplikasi</button>
+</header>
+
+<header id="app" class="hidden">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas" class="hidden"></canvas>
+
+  <div id="count">0</div>
+
+  <button onclick="capture()">Ambil Gambar & Hitung</button>
+  <br><br>
+  <button class="secondary" onclick="resetApp()">Hitung Ulang</button>
+</header>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
+
+const landing = document.getElementById("landing");
+const app = document.getElementById("app");
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const countEl = document.getElementById("count");
+
+async function openApp() {
+  landing.classList.add("hidden");
+  app.classList.remove("hidden");
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: "environment",
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  });
+  video.srcObject = stream;
+}
+
+function capture() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0);
+  canvas.classList.remove("hidden");
+
+  processImage();
+}
+
+function processImage() {
+  const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d = img.data;
+
+  // threshold adaptif
+  let sum = 0;
+  for (let i=0;i<d.length;i+=4){
+    sum += (d[i]+d[i+1]+d[i+2])/3;
+  }
+  const avg = sum / (d.length/4);
+
+  for (let i=0;i<d.length;i+=4){
+    const g = (d[i]+d[i+1]+d[i+2])/3;
+    const v = g > avg ? 255 : 0;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+
+  countEl.textContent = countBlobs(d);
+}
+
+function countBlobs(data){
+  const w = canvas.width;
+  const h = canvas.height;
+  const visited = new Uint8Array(w*h);
+  let count = 0;
+
+  function flood(x,y){
+    let stack=[[x,y]], area=0;
+    while(stack.length){
+      const [cx,cy]=stack.pop();
+      if(cx<0||cy<0||cx>=w||cy>=h) continue;
+      const idx=cy*w+cx;
+      if(visited[idx]) continue;
+      if(data[idx*4]!==255) continue;
+      visited[idx]=1;
+      area++;
+      stack.push([cx+1,cy],[cx-1,cy],[cx,cy+1],[cx,cy-1]);
+    }
+    return area;
+  }
+
+  for(let y=0;y<h;y+=3){
+    for(let x=0;x<w;x+=3){
+      const idx=y*w+x;
+      if(!visited[idx] && data[idx*4]===255){
+        const area=flood(x,y);
+        if(area>500 && area<20000) count++;
+      }
+    }
+  }
+  return count;
+}
+
+function resetApp(){
+  canvas.classList.add("hidden");
+  countEl.textContent = "0";
+}
+</script>
+
+</body>
+</html>
