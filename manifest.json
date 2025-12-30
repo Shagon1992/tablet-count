@@ -1,0 +1,15 @@
+{
+  "name": "Tablet Counter",
+  "short_name": "TabletCount",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f0fdfa",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1046/1046784.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
