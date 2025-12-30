@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tablet Counter (HSV)</title>
+<title>Tablet Counter</title>
 
 <meta name="theme-color" content="#0f766e">
 
@@ -16,12 +16,12 @@ body {
   text-align: center;
 }
 header {
-  padding: 20px;
+  padding: 16px;
 }
 button {
   padding: 14px 20px;
   font-size: 16px;
-  border-radius: 12px;
+  border-radius: 14px;
   border: none;
   background: #0f766e;
   color: white;
@@ -31,15 +31,26 @@ button.secondary {
 }
 .hidden { display: none; }
 
-video, canvas {
+#cameraBox {
   width: 100%;
   max-width: 420px;
-  border-radius: 16px;
-  margin-top: 10px;
+  aspect-ratio: 1 / 1;
+  margin: auto;
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  background: black;
+}
+
+video, canvas {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 #count {
-  font-size: 48px;
+  font-size: 52px;
   font-weight: bold;
   margin: 10px 0;
 }
@@ -51,22 +62,23 @@ small { color:#555; }
 
 <header id="landing">
   <h2>Tablet Counter</h2>
-  <p>HSV Color Detection (Tablet Biru)</p>
+  <p>Hitung tablet otomatis dengan kamera</p>
   <button onclick="openApp()">Buka Aplikasi</button>
 </header>
 
 <header id="app" class="hidden">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas" class="hidden"></canvas>
+  <div id="cameraBox">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" class="hidden"></canvas>
+  </div>
+
+  <small id="hint">Ambil gambar lalu tap 1 tablet</small>
 
   <div id="count">0</div>
 
-  <button onclick="capture()">Ambil Gambar & Hitung</button>
+  <button id="btnCapture" onclick="capture()">Ambil & Hitung</button>
   <br><br>
-  <button class="secondary" onclick="resetApp()">Hitung Ulang</button>
-
-  <br><br>
-  <small>Tablet biru, meja terang, tidak bertumpuk</small>
+  <button class="secondary" onclick="resetApp()">Hitung Lagi</button>
 </header>
 
 <script>
@@ -76,118 +88,173 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const countEl = document.getElementById("count");
+const hint = document.getElementById("hint");
 
+let stream = null;
+let refHSV = null;
+let capturedImage = null;
+
+/* ======================
+   OPEN CAMERA (SQUARE)
+====================== */
 async function openApp() {
   landing.classList.add("hidden");
   app.classList.remove("hidden");
+  await startCamera();
+}
 
-  const stream = await navigator.mediaDevices.getUserMedia({
+async function startCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: "environment",
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
+      width: { ideal: 1080 },
+      height: { ideal: 1080 }
     }
   });
   video.srcObject = stream;
+  video.classList.remove("hidden");
+  canvas.classList.add("hidden");
+  hint.textContent = "Ambil gambar tablet";
 }
 
+function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+}
+
+/* ======================
+   CAPTURE IMAGE
+====================== */
 function capture() {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.drawImage(video, 0, 0);
+  const size = Math.min(video.videoWidth, video.videoHeight);
+  canvas.width = size;
+  canvas.height = size;
+
+  const sx = (video.videoWidth - size) / 2;
+  const sy = (video.videoHeight - size) / 2;
+
+  ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
+  capturedImage = ctx.getImageData(0,0,size,size);
+
+  stopCamera();
+  video.classList.add("hidden");
   canvas.classList.remove("hidden");
 
-  const img = ctx.getImageData(0,0,canvas.width,canvas.height);
-  const mask = createHSVMask(img);
+  refHSV = null;
+  countEl.textContent = "0";
+  hint.textContent = "Tap 1 tablet untuk kalibrasi warna";
+}
+
+/* ======================
+   TAP TO CALIBRATE
+====================== */
+canvas.addEventListener("click", e => {
+  if (!capturedImage || refHSV) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) * canvas.width / rect.width);
+  const y = Math.floor((e.clientY - rect.top) * canvas.height / rect.height);
+
+  const i = (y * canvas.width + x) * 4;
+  const d = capturedImage.data;
+  refHSV = rgbToHsv(d[i], d[i+1], d[i+2]);
+
+  hint.textContent = "Menghitung tablet...";
+  setTimeout(processImage, 50);
+});
+
+/* ======================
+   PROCESS IMAGE
+====================== */
+function processImage() {
+  const mask = createHSVMask(capturedImage);
   const count = countFromMask(mask, canvas.width, canvas.height);
-
   countEl.textContent = count;
+  hint.textContent = "Selesai. Klik Hitung Lagi untuk ulang";
 }
 
-/* =========================
-   RGB -> HSV
-========================= */
+/* ======================
+   RGB → HSV
+====================== */
 function rgbToHsv(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  let max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h, s, v = max;
-  let d = max - min;
-  s = max === 0 ? 0 : d / max;
-
-  if (max === min) {
-    h = 0;
-  } else {
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      case b: h = (r - g) / d + 4; break;
+  r/=255; g/=255; b/=255;
+  let max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let h,s,v=max;
+  let d=max-min;
+  s=max===0?0:d/max;
+  if(max===min) h=0;
+  else{
+    switch(max){
+      case r: h=(g-b)/d+(g<b?6:0); break;
+      case g: h=(b-r)/d+2; break;
+      case b: h=(r-g)/d+4; break;
     }
-    h *= 60;
+    h*=60;
   }
-  return [h, s * 100, v * 100];
+  return [h,s*100,v*100];
 }
 
-/* =========================
-   HSV MASK (TABLET BIRU)
-========================= */
-function createHSVMask(img) {
-  const d = img.data;
-  const w = img.width;
-  const h = img.height;
-  const mask = new Uint8Array(w * h);
+/* ======================
+   CREATE HSV MASK
+====================== */
+function createHSVMask(img){
+  const [Href,Sref,Vref] = refHSV;
+  const d=img.data;
+  const mask=new Uint8Array(img.width*img.height);
 
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    const [H, S, V] = rgbToHsv(d[i], d[i+1], d[i+2]);
+  for(let i=0,p=0;i<d.length;i+=4,p++){
+    const [H,S,V]=rgbToHsv(d[i],d[i+1],d[i+2]);
+    const dH=Math.min(Math.abs(H-Href),360-Math.abs(H-Href));
 
-    // RANGE TABLET BIRU
-    if (
-      H > 190 && H < 240 &&   // Hue biru
-      S > 35 &&               // Saturasi
-      V > 40                  // Brightness
-    ) {
-      mask[p] = 1;
+    if(
+      dH < 18 &&
+      S > Math.max(25, Sref*0.5) &&
+      V > Math.max(35, Vref*0.5)
+    ){
+      mask[p]=1;
     }
   }
   return mask;
 }
 
-/* =========================
+/* ======================
    COUNT BLOBS
-========================= */
-function countFromMask(mask, w, h) {
-  const visited = new Uint8Array(w * h);
-  let count = 0;
+====================== */
+function countFromMask(mask,w,h){
+  const visited=new Uint8Array(w*h);
+  let count=0;
 
-  function flood(start) {
-    let stack = [start];
-    let area = 0;
-
-    while (stack.length) {
-      const p = stack.pop();
-      if (p < 0 || p >= w * h || visited[p] || !mask[p]) continue;
-
-      visited[p] = 1;
+  function flood(i){
+    let stack=[i], area=0;
+    while(stack.length){
+      const p=stack.pop();
+      if(p<0||p>=w*h||visited[p]||!mask[p]) continue;
+      visited[p]=1;
       area++;
-
-      stack.push(p + 1, p - 1, p + w, p - w);
+      stack.push(p+1,p-1,p+w,p-w);
     }
     return area;
   }
 
-  for (let i = 0; i < w * h; i += 4) {
-    if (mask[i] && !visited[i]) {
-      const area = flood(i);
-      if (area > 400 && area < 25000) {
-        count++;
-      }
+  for(let i=0;i<w*h;i+=3){
+    if(mask[i]&&!visited[i]){
+      const area=flood(i);
+      if(area>500 && area<30000) count++;
     }
   }
   return count;
 }
 
-function resetApp() {
-  canvas.classList.add("hidden");
-  countEl.textContent = "0";
+/* ======================
+   RESET
+====================== */
+function resetApp(){
+  capturedImage=null;
+  refHSV=null;
+  countEl.textContent="0";
+  startCamera();
 }
 </script>
 
